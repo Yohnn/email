@@ -1,19 +1,18 @@
-use core::panic;
 use oauth2::basic::BasicClient;
-use oauth2::reqwest;
+// use oauth2::reqwest;
 use oauth2::{
-    AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, PkceCodeChallenge, RedirectUrl,
-    Scope, TokenResponse, TokenUrl,
+    AuthUrl, ClientId, ClientSecret, CsrfToken, PkceCodeChallenge, RedirectUrl, Scope, TokenUrl,
 };
-use open;
+// use open;
 use serde::Deserialize;
+use std::collections::HashMap;
+use std::fs;
 use std::io::{BufRead, BufReader};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::mpsc::Sender;
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::sync::mpsc::{self, Sender};
 use std::thread;
-use std::{fs, time};
+use std::time;
 
 #[derive(Deserialize, Debug)]
 struct InstalledCredentials {
@@ -30,9 +29,29 @@ struct CredentialsFile {
 }
 
 enum AuthResult {
-    Timeout,
     Success,
 }
+
+/*
+1. Prompt auth -> starts and opens authorization
+
+2. Auth Awaiter (receives auth event, sends auth event)
+    start await auth flow
+    start endpoint and listen... {
+        process requests
+        if request is good auth {
+            send stop timeout
+            end thread
+        }
+        else {
+            do nothing
+    }
+    }
+
+
+
+
+*/
 
 fn main() {
     let path: &str = "credentials.json";
@@ -54,103 +73,102 @@ fn main() {
     // Generate a PKCE challenge.
     let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
 
-    // let auth_thread = thread::Builder()::new().name("auth".to_string()).spawn(move || {
-    //     let (auth_url, csrf_token) = client
-    //         .authorize_url(CsrfToken::new_random)
-    //         // Set the desired scopes.
-    //         .add_scope(Scope::new(
-    //             "https://www.googleapis.com/auth/gmail.readonly".to_string(),
-    //         ))
-    //         // Set the PKCE code challenge.
-    //         .set_pkce_challenge(pkce_challenge)
-    //         .url();
+    let auth_thread = thread::Builder::new()
+        .name("auth".to_string())
+        .spawn(move || {
+            let (auth_url, csrf_token) = client
+                .authorize_url(CsrfToken::new_random)
+                // Set the desired scopes.
+                .add_scope(Scope::new(
+                    "https://www.googleapis.com/auth/gmail.readonly".to_string(),
+                ))
+                // Set the PKCE code challenge.
+                .set_pkce_challenge(pkce_challenge)
+                .url();
 
-    //     // This is the URL you should redirect the user to, in order to trigger the authorization
-    //     // process.
-    //     println!("Opening: {}", auth_url);
-    //     open::that(auth_url.to_string()).unwrap();
-    // });
+            // This is the URL you should redirect the user to, in order to trigger the authorization
+            // process.
+            println!("Opening: {}", auth_url);
+            println!("Must verify against csrf token: {:?}", csrf_token.secret());
+            open::that(auth_url.to_string()).unwrap();
+        });
 
     let (tx_auth, rx_auth) = mpsc::channel();
-    let (tx_timeout, rx_timeout) = mpsc::channel();
 
     let tx_auth_listener = tx_auth.clone();
-    let listener = TcpListener::bind("127.0.0.1:7878").unwrap();
-    start_timeout_countdown(tx_auth, rx_timeout, 10000);
 
-    let listener_thread = thread::Builder::new()
-        .name("listener".to_string())
+    let await_auth_thread = thread::Builder::new()
+        .name("await_auth".to_string())
         .spawn(move || {
+            let listener = TcpListener::bind("127.0.0.1:7878").unwrap();
+
             for stream in listener.incoming() {
                 let stream = stream.unwrap();
                 let tx_handler = tx_auth_listener.clone();
-                handle_connection(stream, tx_handler);
-            }
-        })
-        .unwrap();
-
-    let listener_result = match listener_thread.join() {
-        Ok(a) => println!("{:?}", a),
-        error => println!("{:?}", error),
-    };
-
-    let receiver_thread = thread::Builder::new()
-        .name("receiver".to_string())
-        .spawn(move || {
-            for received in rx_auth {
-                match received {
-                    AuthResult::Timeout => {
-                        panic!("Timeout reached for authentication. Closing program.")
-                    }
-                    AuthResult::Success => {
-                        println!("Authorization success!");
-                        break;
-                    }
+                let is_auth_success: bool = handle_auth(stream, tx_handler);
+                if is_auth_success {
+                    tx_auth.send(AuthResult::Success).unwrap();
+                    break;
                 }
             }
         })
         .unwrap();
 
-    // auth_thread.join().unwrap();
+    let max_timeout: time::Duration = time::Duration::from_millis(120000);
+
+    println!("Awaiting authorization...");
+    match rx_auth.recv_timeout(max_timeout) {
+        Ok(_) => println!("Authorization successful, proceeding to program..."),
+        Err(_) => panic!("Failed to authorize within given time! Please try again."),
+    }
 }
 
-fn start_timeout_countdown(tx: Sender<AuthResult>, rx: mpsc::Receiver<AuthResult>, timeout: u64) {
-    let r = match thread::Builder::new()
-        .name("timeout".to_string())
-        .spawn(move || {
-            let timeout_duration = time::Duration::from_millis(timeout);
-            thread::sleep(timeout_duration);
-            let timeout_message = match rx.recv_timeout(timeout_duration) {
-                Ok(a) => return,
-                RecvTimeoutError => tx.send(AuthResult::Timeout).unwrap(),
-            };
-        }) {
-        Ok(a) => println!("{:?}", a),
-        error => println!("{:?}", error),
-    };
-}
+fn handle_auth(mut stream: TcpStream, tx: Sender<AuthResult>) -> bool {
+    let mut buf_reader = BufReader::new(&stream);
+    let mut request_line = String::new();
+    buf_reader.read_line(&mut request_line).unwrap();
 
-fn handle_connection(mut stream: TcpStream, tx: Sender<AuthResult>) {
-    let buf_reader = BufReader::new(&stream);
-    // let request_line = buf_reader.lines().next().unwrap().unwrap();
-    let request_line = match buf_reader.lines().next() {
-        Some(a) => match a {
-            Ok(b) => b,
-            _ => return,
-        },
-        None => return,
-    };
-    let (status_line, filename) = if request_line == "GET /authcallback HTTP/1.1" {
-        tx.send(AuthResult::Success).unwrap();
-        ("HTTP/1.1 200 OK", "auth_success.html")
-    } else {
-        ("HTTP/1.1 404 NOT FOUND", "404.html")
-    };
+    // Parse request line (e.g., "POST /path HTTP/1.1")
+    let parts: Vec<&str> = request_line.trim().split_whitespace().collect();
+    println!("{:?}", parts);
+    if parts.len() < 3 || parts[0] != "GET" {
+        println!(
+            "Invalid HTTP Method received. Got {:?}. Must be GET.",
+            parts[0]
+        );
+        let status_line = "HTTP/1.1 404 NOT FOUND".to_string();
+        let contents = fs::read_to_string("404.html").unwrap();
+        let length = contents.len();
+        let response = format!("{status_line}\r\nContent-Length: {length}\r\n\r\n{contents}");
+        stream.write_all(response.as_bytes()).unwrap();
+        return false;
+    }
 
-    let contents = fs::read_to_string(filename).unwrap();
+    if !parts[1].starts_with("/authcallback") {
+        return false;
+    }
+
+    // oauth information is in url, we parse the url
+    let url = parts[1];
+    let query_pairs = parse_url(url);
+    println!("Query pairs {:?}", query_pairs);
+    let status_line = "HTTP/1.1 200 OK".to_string();
+    let contents = fs::read_to_string("auth_success.html").unwrap();
     let length = contents.len();
-
     let response = format!("{status_line}\r\nContent-Length: {length}\r\n\r\n{contents}");
-
     stream.write_all(response.as_bytes()).unwrap();
+    tx.send(AuthResult::Success).unwrap();
+    return false;
+}
+
+fn parse_url(url: &str) -> HashMap<&str, &str> {
+    let query: Vec<&str> = url.split("?").collect();
+
+    let query_parts: Vec<&str> = query[1].split("&").collect();
+    let mut query_pairs = HashMap::new();
+    for part in query_parts {
+        let query_pair: Vec<&str> = part.split("=").collect();
+        query_pairs.insert(query_pair[0], query_pair[1]);
+    }
+    return query_pairs;
 }

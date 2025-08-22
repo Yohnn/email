@@ -9,6 +9,3 @@ serde = "1"
 serde_json = "1"
 oauth2 = "5.0.0"
 open = "5.3.2"
-# rustls = { version = "0.23", features = ["ring","logging","tls12"], default-features = false }
-# ring = { version = "0.17" }
-tokio = {version = "1.47.1", features = ["full"]}

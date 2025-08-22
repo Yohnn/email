@@ -123,7 +123,7 @@ fn main() {
     }
 }
 
-fn handle_auth(mut stream: TcpStream, tx: Sender<AuthResult>) -> bool {
+fn handle_auth(stream: TcpStream, tx: Sender<AuthResult>) -> bool {
     let mut buf_reader = BufReader::new(&stream);
     let mut request_line = String::new();
     buf_reader.read_line(&mut request_line).unwrap();
@@ -136,11 +136,7 @@ fn handle_auth(mut stream: TcpStream, tx: Sender<AuthResult>) -> bool {
             "Invalid HTTP Method received. Got {:?}. Must be GET.",
             parts[0]
         );
-        let status_line = "HTTP/1.1 404 NOT FOUND".to_string();
-        let contents = fs::read_to_string("404.html").unwrap();
-        let length = contents.len();
-        let response = format!("{status_line}\r\nContent-Length: {length}\r\n\r\n{contents}");
-        stream.write_all(response.as_bytes()).unwrap();
+        return_response("HTTP/1.1 404 NOT FOUND", &stream, "404.html");
         return false;
     }
 
@@ -152,11 +148,8 @@ fn handle_auth(mut stream: TcpStream, tx: Sender<AuthResult>) -> bool {
     let url = parts[1];
     let query_pairs = parse_url(url);
     println!("Query pairs {:?}", query_pairs);
-    let status_line = "HTTP/1.1 200 OK".to_string();
-    let contents = fs::read_to_string("auth_success.html").unwrap();
-    let length = contents.len();
-    let response = format!("{status_line}\r\nContent-Length: {length}\r\n\r\n{contents}");
-    stream.write_all(response.as_bytes()).unwrap();
+    return_response("HTTP/1.1 200 OK", &stream, "auth_success.html");
+
     tx.send(AuthResult::Success).unwrap();
     return false;
 }
@@ -171,4 +164,12 @@ fn parse_url(url: &str) -> HashMap<&str, &str> {
         query_pairs.insert(query_pair[0], query_pair[1]);
     }
     return query_pairs;
+}
+
+fn return_response(status_line: &str, mut stream: &TcpStream, html_file: &str) {
+    let status_line = status_line.to_string();
+    let contents = fs::read_to_string(html_file).unwrap();
+    let length = contents.len();
+    let response = format!("{status_line}\r\nContent-Length: {length}\r\n\r\n{contents}");
+    stream.write_all(response.as_bytes()).unwrap();
 }

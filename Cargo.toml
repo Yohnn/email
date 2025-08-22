@@ -1,0 +1,14 @@
+[package]
+name = "email"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# google-gmail1 = "*"
+serde = "1"
+serde_json = "1"
+oauth2 = "5.0.0"
+open = "5.3.2"
+# rustls = { version = "0.23", features = ["ring","logging","tls12"], default-features = false }
+# ring = { version = "0.17" }
+tokio = {version = "1.47.1", features = ["full"]}

@@ -1,4 +1,5 @@
-use oauth2::CsrfToken;
+use oauth2::basic::BasicTokenType;
+use oauth2::{CsrfToken, EmptyExtraTokenFields, StandardTokenResponse};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
@@ -30,7 +31,7 @@ pub fn handle_auth(stream: TcpStream, csrf_token: CsrfToken) -> Option<AuthResul
     let mut request_line = String::new();
     buf_reader.read_line(&mut request_line).unwrap();
 
-    // Parse request line (e.g., "POST /path HTTP/1.1")
+    // Parse request line (e.g., "GET /path HTTP/1.1")
     let parts: Vec<&str> = request_line.trim().split_whitespace().collect();
     println!("{:?}", parts);
     if parts.len() < 3 || parts[0] != "GET" {
@@ -84,4 +85,14 @@ fn return_response(status_line: &str, mut stream: &TcpStream, html_file: &str) {
     let length = contents.len();
     let response = format!("{status_line}\r\nContent-Length: {length}\r\n\r\n{contents}");
     stream.write_all(response.as_bytes()).unwrap();
+}
+
+pub fn save_token(
+    path: String,
+    token: &StandardTokenResponse<EmptyExtraTokenFields, BasicTokenType>,
+) {
+    let mut file = fs::File::create(&path).unwrap();
+    let json = serde_json::to_string_pretty(token).unwrap();
+    file.write_all(json.as_bytes()).unwrap();
+    println!("Saved token to {path}");
 }

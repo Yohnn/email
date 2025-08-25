@@ -108,10 +108,10 @@ impl GmailClient {
         let (auth_url, csrf_token) = client
             .authorize_url(CsrfToken::new_random)
             .add_scope(Scope::new(
-                google_gmail1::api::Scope::Send.as_ref().to_string(),
+                google_gmail1::api::Scope::Compose.as_ref().to_string(),
             ))
             .add_scope(Scope::new(
-                google_gmail1::api::Scope::Readonly.as_ref().to_string(),
+                google_gmail1::api::Scope::Modify.as_ref().to_string(),
             ))
             .set_pkce_challenge(pkce_challenge)
             .url();
@@ -147,7 +147,7 @@ impl GmailClient {
             })
             .unwrap();
 
-        let max_timeout: time::Duration = time::Duration::from_millis(10000);
+        let max_timeout: time::Duration = time::Duration::from_millis(20000);
 
         println!("Awaiting authorization...");
 
@@ -181,12 +181,11 @@ impl GmailClient {
 }
 
 fn substitute_email_params(template: String, args: &Args) -> String {
-    let template = template.clone();
-    let template = template.replace("{user}", &args.user);
-    let template = template.replace("{from}", &args.from);
-    let template = template.replace("{to}", &args.to);
+    let template = template.replace("{from_email}", &args.from_email);
+    let template = template.replace("{from_name}", &args.from_name);
+    let template = template.replace("{to_email}", &args.to_email);
     let template = template.replace("{from_first_name}", &args.from_first_name);
-    let template = template.replace("{contact_name}", &args.contact_name);
+    let template = template.replace("{to_contact_name}", &args.to_contact_name);
 
     return template;
 }

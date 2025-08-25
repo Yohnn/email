@@ -7,15 +7,15 @@ pub struct Args {
     #[arg(long)]
     pub template: String,
     #[arg(long)]
-    pub from: String,
+    pub from_name: String,
     #[arg(long)]
-    pub to: String,
+    pub to_email: String,
     #[arg(short, long)]
-    pub user: String,
+    pub from_email: String,
     #[arg(long)]
     pub from_first_name: String,
     #[arg(short, long)]
-    pub contact_name: String,
+    pub to_contact_name: String,
 }
 
 pub fn get_args() -> Args {
